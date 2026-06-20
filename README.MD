@@ -55,7 +55,7 @@ NEW_CADDY="${BUILD_DIR}/caddy"
 
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2Dem13/caddy-naive-udp-support/main/enable-naive-udp.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/2Dem13/caddy-naive-udp-support/main/enable-naive-udp.sh | bash
 ```
 
 ## Что будет с текущим бинарником
