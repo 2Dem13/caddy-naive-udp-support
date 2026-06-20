@@ -5,11 +5,9 @@ CADDY_SERVICE="caddy-naive"
 CADDY_BIN="/usr/local/bin/caddy-naive"
 BUILD_DIR="/root"
 NEW_CADDY="${BUILD_DIR}/caddy"
-XCADDY="${XCADDY:-}"
 
-# Отдельный каталог для временных файлов (не в /tmp, чтобы не упираться в tmpfs)
-BUILD_TMP="${BUILD_DIR}/caddy-build-tmp"
-mkdir -p "$BUILD_TMP"
+# Прямая ссылка на бинарник (версия 2.11.4)
+DOWNLOAD_URL="https://github.com/2Dem13/caddy-naive-udp-support/releases/download/2.11.4/caddy"
 
 OLD_BACKUP="${CADDY_BIN}_old_$(date +%Y%m%d-%H%M%S)"
 
@@ -32,74 +30,8 @@ need_root() {
   fi
 }
 
-install_go_if_needed() {
-  if command -v go >/dev/null 2>&1; then
-    log "Go найден: $(go version)"
-    return
-  fi
-
-  log "Go не найден, пробуем установить"
-
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update
-    apt-get install -y golang-go
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y golang
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y golang
-  else
-    err "Не удалось установить Go автоматически: не найден apt-get, dnf или yum"
-    echo ""
-    echo "Установи Go вручную и запусти скрипт снова."
-    exit 1
-  fi
-
-  if ! command -v go >/dev/null 2>&1; then
-    err "Go был установлен, но команда go всё ещё не найдена"
-    exit 1
-  fi
-
-  log "Go установлен: $(go version)"
-}
-
-install_xcaddy_if_needed() {
-  if [[ -n "$XCADDY" && -x "$XCADDY" ]]; then
-    log "xcaddy найден: $XCADDY"
-    return
-  fi
-
-  if command -v xcaddy >/dev/null 2>&1; then
-    XCADDY="$(command -v xcaddy)"
-    log "xcaddy найден: $XCADDY"
-    return
-  fi
-
-  local gopath
-  gopath="$(go env GOPATH)"
-  XCADDY="${gopath}/bin/xcaddy"
-
-  if [[ -x "$XCADDY" ]]; then
-    log "xcaddy найден: $XCADDY"
-    return
-  fi
-
-  log "xcaddy не найден, устанавливаем через go install"
-
-  go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-
-  if [[ ! -x "$XCADDY" ]]; then
-    err "xcaddy был установлен, но бинарник не найден или не исполняемый: $XCADDY"
-    exit 1
-  fi
-
-  log "xcaddy установлен: $XCADDY"
-}
-
 check_requirements() {
   log "Проверяем зависимости"
-
-  install_go_if_needed
-  install_xcaddy_if_needed
 
   if [[ ! -f "$CADDY_BIN" ]]; then
     err "Не найден текущий caddy-naive: $CADDY_BIN"
@@ -111,46 +43,34 @@ check_requirements() {
     exit 1
   fi
 
-  log "OK"
-}
-
-build_caddy() {
-  log "Собираем новый Caddy с naive forwardproxy UDP support (минимальные ресурсы)"
-
-  rm -f "$NEW_CADDY"
-
-  # 1. Перенаправляем временные файлы в отдельный каталог на диске
-  export TMPDIR="$BUILD_TMP"
-  log "TMPDIR=$TMPDIR"
-
-  # 2. Очищаем кэш Go — экономит сотни мегабайт места и ускоряет сборку
-  log "Очищаем кэш Go..."
-  go clean -cache -modcache -testcache -fuzzcache
-
-  # 3. Ограничиваем параллелизм компиляции — снижает пиковое потребление RAM
-  export GOMAXPROCS=2
-  log "GOMAXPROCS=$GOMAXPROCS"
-
-  cd "$BUILD_DIR"
-
-  # 4. Сборка с минимальным бинарником (-ldflags="-s -w")
-  "$XCADDY" build \
-    --with github.com/caddyserver/forwardproxy@caddy2=github.com/aUsernameWoW/forwardproxy@naive \
-    -ldflags="-s -w"
-
-  if [[ ! -x "$NEW_CADDY" ]]; then
-    err "Сборка завершилась, но бинарник не найден или не исполняемый: $NEW_CADDY"
+  if ! command -v curl >/dev/null 2>&1; then
+    err "curl не найден — требуется для скачивания бинарника"
     exit 1
   fi
 
-  log "Новый Caddy собран: $NEW_CADDY"
-  ls -lh "$NEW_CADDY"
+  log "OK"
+}
 
-  log "Версия нового Caddy:"
-  "$NEW_CADDY" version || true
+fetch_binary() {
+  log "Скачиваем бинарный файл: $DOWNLOAD_URL"
 
-  # 5. Опционально: чистим TMPDIR после успешной сборки (раскомментируй, если хочешь сразу освободить место)
-  # rm -rf "${BUILD_TMP:?}"/*
+  rm -f "$NEW_CADDY"
+
+  curl -L -o "$NEW_CADDY" "$DOWNLOAD_URL"
+
+  if [[ ! -s "$NEW_CADDY" ]]; then
+    err "Файл скачался пустым или не скачался"
+    exit 1
+  fi
+
+  chmod 755 "$NEW_CADDY"
+
+  if [[ ! -x "$NEW_CADDY" ]]; then
+    err "Скачанный файл не является исполняемым"
+    exit 1
+  fi
+
+  log "Бинарник скачан и сделан исполняемым: $NEW_CADDY"
 }
 
 stop_current_caddy() {
@@ -245,7 +165,7 @@ verify() {
 main() {
   need_root
   check_requirements
-  build_caddy
+  fetch_binary
   stop_current_caddy
   install_new_caddy
   start_caddy
