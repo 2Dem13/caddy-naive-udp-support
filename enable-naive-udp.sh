@@ -118,7 +118,8 @@ build_caddy() {
   cd "$BUILD_DIR"
 
   "$XCADDY" build \
-    --with github.com/caddyserver/forwardproxy@caddy2=github.com/aUsernameWoW/forwardproxy@naive
+    --with github.com/caddyserver/forwardproxy@caddy2=github.com/aUsernameWoW/forwardproxy@naive \
+    -ldflags="-s -w"
 
   if [[ ! -x "$NEW_CADDY" ]]; then
     err "Сборка завершилась, но бинарник не найден или не исполняемый: $NEW_CADDY"
