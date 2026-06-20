@@ -7,6 +7,10 @@ BUILD_DIR="/root"
 NEW_CADDY="${BUILD_DIR}/caddy"
 XCADDY="${XCADDY:-}"
 
+# Отдельный каталог для временных файлов (не в /tmp, чтобы не упираться в tmpfs)
+BUILD_TMP="${BUILD_DIR}/caddy-build-tmp"
+mkdir -p "$BUILD_TMP"
+
 OLD_BACKUP="${CADDY_BIN}_old_$(date +%Y%m%d-%H%M%S)"
 
 log() {
@@ -111,12 +115,25 @@ check_requirements() {
 }
 
 build_caddy() {
-  log "Собираем новый Caddy с naive forwardproxy UDP support"
+  log "Собираем новый Caddy с naive forwardproxy UDP support (минимальные ресурсы)"
 
   rm -f "$NEW_CADDY"
 
+  # 1. Перенаправляем временные файлы в отдельный каталог на диске
+  export TMPDIR="$BUILD_TMP"
+  log "TMPDIR=$TMPDIR"
+
+  # 2. Очищаем кэш Go — экономит сотни мегабайт места и ускоряет сборку
+  log "Очищаем кэш Go..."
+  go clean -cache -modcache -testcache -fuzzcache
+
+  # 3. Ограничиваем параллелизм компиляции — снижает пиковое потребление RAM
+  export GOMAXPROCS=2
+  log "GOMAXPROCS=$GOMAXPROCS"
+
   cd "$BUILD_DIR"
 
+  # 4. Сборка с минимальным бинарником (-ldflags="-s -w")
   "$XCADDY" build \
     --with github.com/caddyserver/forwardproxy@caddy2=github.com/aUsernameWoW/forwardproxy@naive \
     -ldflags="-s -w"
@@ -127,9 +144,13 @@ build_caddy() {
   fi
 
   log "Новый Caddy собран: $NEW_CADDY"
+  ls -lh "$NEW_CADDY"
 
   log "Версия нового Caddy:"
   "$NEW_CADDY" version || true
+
+  # 5. Опционально: чистим TMPDIR после успешной сборки (раскомментируй, если хочешь сразу освободить место)
+  # rm -rf "${BUILD_TMP:?}"/*
 }
 
 stop_current_caddy() {
